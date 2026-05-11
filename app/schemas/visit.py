@@ -23,7 +23,7 @@ class VisitCertificationResponse(BaseModel):
     store_id: int
     user_latitude: float
     user_longitude: float
-    distance_meters: int
+    distance_meters: Optional[int] = None
     certification_type: str
     status: str
     earned_points: int

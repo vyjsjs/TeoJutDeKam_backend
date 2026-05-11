@@ -1,33 +1,17 @@
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
+from supabase import create_client, Client
+from sqlalchemy.orm import declarative_base
+
 from app.core.config import settings
 
-
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.APP_ENV == "development",
-    pool_size=10,
-    max_overflow=20,
-)
-
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+# SQLAlchemy Base — 런타임 API는 Supabase 클라이언트만 사용합니다.
+# `app/models/*`, Alembic(autogenerate) 참조용으로 유지합니다.
+Base = declarative_base()
 
 
-class Base(DeclarativeBase):
-    pass
+def get_supabase() -> Client:
+    """Supabase 클라이언트 인스턴스 반환 (싱글톤)"""
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 
 
-async def get_db() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+# 글로벌 인스턴스
+supabase: Client = get_supabase()

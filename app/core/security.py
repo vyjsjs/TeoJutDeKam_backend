@@ -1,18 +1,11 @@
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from fastapi import HTTPException, Header, status
 
-from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import supabase
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -23,80 +16,46 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    return encoded_jwt
+def get_current_user(
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+) -> dict:
+    """X-User-ID 헤더에서 사용자 ID를 읽어 인증 처리 (MVP 단순 인증)"""
+    if x_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="인증이 필요합니다. X-User-ID 헤더를 설정해주세요.",
+        )
 
-
-def decode_access_token(token: str) -> Optional[dict]:
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        return payload
-    except JWTError:
-        return None
-
-
-async def get_current_user(
-    token: Optional[str] = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
-):
-    if token is None:
+        user_id = int(x_user_id)
+    except (ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="인증이 필요합니다.",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="유효하지 않은 사용자 ID입니다.",
         )
 
-    payload = decode_access_token(token)
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="유효하지 않은 토큰입니다.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    result = supabase.table("users").select("*").eq("id", user_id).execute()
 
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="유효하지 않은 토큰입니다.",
-        )
-
-    from app.models.user import User
-    result = await db.execute(select(User).where(User.id == int(user_id)))
-    user = result.scalar_one_or_none()
-
-    if user is None:
+    if not result.data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="사용자를 찾을 수 없습니다.",
         )
 
-    return user
+    return result.data[0]
 
 
-async def get_current_user_optional(
-    token: Optional[str] = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
-):
-    """Returns user if authenticated, None otherwise."""
-    if token is None:
+def get_current_user_optional(
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+) -> Optional[dict]:
+    """Returns user dict if X-User-ID header is present, None otherwise."""
+    if x_user_id is None:
         return None
 
-    payload = decode_access_token(token)
-    if payload is None:
+    try:
+        user_id = int(x_user_id)
+    except (ValueError, TypeError):
         return None
 
-    user_id = payload.get("sub")
-    if user_id is None:
-        return None
-
-    from app.models.user import User
-    result = await db.execute(select(User).where(User.id == int(user_id)))
-    return result.scalar_one_or_none()
+    result = supabase.table("users").select("*").eq("id", user_id).execute()
+    return result.data[0] if result.data else None

@@ -3,19 +3,9 @@ from typing import List
 
 
 class Settings(BaseSettings):
-    # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/teojutdekam"
-    DATABASE_URL_SYNC: str = "postgresql+psycopg2://postgres:password@localhost:5432/teojutdekam"
-
-    # JWT
-    SECRET_KEY: str = "your-secret-key-change-this-in-production"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
-
-    # Kakao OAuth
-    KAKAO_CLIENT_ID: str = ""
-    KAKAO_CLIENT_SECRET: str = ""
-    KAKAO_REDIRECT_URI: str = "http://localhost:8000/api/auth/kakao/callback"
+    # Supabase
+    SUPABASE_URL: str = ""
+    SUPABASE_KEY: str = ""
 
     # App
     APP_ENV: str = "development"

@@ -1,87 +1,66 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.security import get_current_user
-from app.core.config import settings
-from app.models.user import User
 from app.schemas.user import (
     SignUpRequest,
     LoginRequest,
-    KakaoCallbackRequest,
-    TokenResponse,
+    SocialLoginRequest,
+    LoginResponse,
     UserResponse,
 )
 from app.services.auth_service import (
     create_user,
     authenticate_user,
-    generate_token,
-    kakao_login,
+    authenticate_social,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["인증"])
 
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def signup(data: SignUpRequest, db: AsyncSession = Depends(get_db)):
-    """자체 회원가입"""
+def signup(data: SignUpRequest):
+    """회원가입 (로컬: email+password / 소셜: login_type+provider_id)"""
     try:
-        user = await create_user(db, data)
-        return user
+        return create_user(data)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """자체 로그인 (이메일/비밀번호)"""
-    user = await authenticate_user(db, data)
+@router.post("/login", response_model=LoginResponse)
+def login(data: LoginRequest):
+    """로컬 로그인 (이메일 + 비밀번호) → user_id 반환"""
+    user = authenticate_user(data)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="이메일 또는 비밀번호가 올바르지 않습니다.",
         )
-    token = generate_token(user)
-    return TokenResponse(access_token=token)
-
-
-@router.get("/kakao")
-async def kakao_auth_redirect():
-    """카카오 OAuth 로그인 리다이렉트 URL 반환"""
-    kakao_auth_url = (
-        f"https://kauth.kakao.com/oauth/authorize"
-        f"?client_id={settings.KAKAO_CLIENT_ID}"
-        f"&redirect_uri={settings.KAKAO_REDIRECT_URI}"
-        f"&response_type=code"
+    return LoginResponse(
+        user_id=user["id"],
+        email=user.get("email"),
+        nickname=user["nickname"],
+        login_type=user.get("login_type") or "local",
     )
-    return {"auth_url": kakao_auth_url}
 
 
-@router.get("/kakao/callback")
-async def kakao_callback(code: str, db: AsyncSession = Depends(get_db)):
-    """카카오 OAuth 콜백 처리"""
-    try:
-        user, token = await kakao_login(db, code)
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "user": UserResponse.model_validate(user),
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/kakao/token", response_model=TokenResponse)
-async def kakao_token_login(data: KakaoCallbackRequest, db: AsyncSession = Depends(get_db)):
-    """프론트에서 받은 카카오 인가 코드로 로그인 처리 (SPA용)"""
-    try:
-        user, token = await kakao_login(db, data.code)
-        return TokenResponse(access_token=token)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+@router.post("/login/social", response_model=LoginResponse)
+def login_social(data: SocialLoginRequest):
+    """소셜 로그인 (이미 /signup 으로 등록된 계정만)"""
+    user = authenticate_social(data)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="등록되지 않은 소셜 계정입니다. 먼저 회원가입 해주세요.",
+        )
+    return LoginResponse(
+        user_id=user["id"],
+        email=user.get("email"),
+        nickname=user["nickname"],
+        login_type=user.get("login_type") or "local",
+    )
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
-    """현재 로그인한 사용자 정보 조회"""
+def get_me(current_user: dict = Depends(get_current_user)):
+    """현재 사용자 정보 (X-User-ID 헤더)"""
     return current_user

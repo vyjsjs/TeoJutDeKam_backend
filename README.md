@@ -5,17 +5,17 @@
 ## 🚀 기술 스택
 
 - **Framework**: FastAPI (Python 3.11+)
-- **Database**: PostgreSQL 15 + SQLAlchemy 2.0 (Async)
-- **Auth**: JWT + Kakao OAuth
+- **Database**: Supabase PostgreSQL + SQLAlchemy 2.0 (Async)
+- **Auth**: 로컬 이메일·비밀번호 + 소셜(`login_type`·`provider_id`, ERD) (단순 `X-User-ID` 헤더)
 - **Migrations**: Alembic
 - **Container**: Docker + Docker Compose
 
 ## 📋 주요 기능
 
 ### 1. 인증 (Auth)
-- 자체 회원가입/로그인 (이메일 + 비밀번호)
-- 카카오 소셜 로그인
-- JWT 토큰 기반 인증
+- 회원가입: 로컬(`email`+`password`) 또는 소셜(`login_type`+`provider_id`, `nickname`)
+- 로그인: `POST /api/auth/login` (로컬), `POST /api/auth/login/social` (소셜)
+- 로그인 시 `user_id` 반환 → 프론트에서 `X-User-ID` 헤더로 전송
 
 ### 2. 방문 인증 (Visit Certification)
 - **GPS 인증**: 매장 50m 이내 진입 시 자동 인증 (Haversine 거리 계산)
@@ -35,7 +35,7 @@
 - 터줏대감 리스트 표시
 
 ### 5. 리뷰
-- 방문 인증 기반 리뷰 작성
+- 승인된 방문 인증당 리뷰 1건 (`visit_certification_id` 필수, ERD 1:1)
 - 매장별 리뷰 목록
 - 내 리뷰 목록
 
@@ -52,7 +52,7 @@ app/
 ├── core/
 │   ├── config.py      # 환경 설정
 │   ├── database.py    # DB 연결
-│   └── security.py    # JWT, 비밀번호 해싱
+│   └── security.py    # 비밀번호 해싱, X-User-ID 인증
 ├── models/
 │   ├── user.py
 │   ├── store.py
@@ -84,7 +84,13 @@ app/
 
 ## 🔧 실행 방법
 
-### Docker Compose (추천)
+### 사전 준비: Supabase 설정
+
+1. [Supabase](https://supabase.com)에서 프로젝트 생성
+2. Project Settings > Database > Connection string 에서 URI 복사
+3. `.env` 파일에 DATABASE_URL 설정
+
+### Docker Compose
 
 ```bash
 docker compose up --build
@@ -102,7 +108,7 @@ pip install -r requirements.txt
 
 # .env 파일 설정
 cp .env.example .env
-# .env 파일에서 DATABASE_URL 등 수정
+# .env 파일에서 Supabase DATABASE_URL 수정
 
 # DB 시드 데이터
 python -m app.seed
@@ -115,38 +121,55 @@ uvicorn app.main:app --reload
 
 서버 실행 후: http://localhost:8000/docs (Swagger UI)
 
-## 📧 테스트 계정
+## 🔐 인증 방식 (MVP)
+
+JWT를 사용하지 않고, 단순 `X-User-ID` 헤더 방식으로 인증합니다.
+
+1. **회원가입**: `POST /api/auth/signup` → 유저 생성
+2. **로그인**: `POST /api/auth/login` → `user_id` 반환
+3. **인증 필요 API**: 요청 시 `X-User-ID: {user_id}` 헤더 추가
+
+```bash
+# 로그인 예시 (로컬)
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "test1234"}'
+
+# 인증 필요 API 호출 예시
+curl http://localhost:8000/api/auth/me \
+  -H "X-User-ID: 1"
+```
+
+## 📧 테스트 계정 (시드 기준)
 
 | 이메일 | 비밀번호 | 닉네임 |
 |--------|----------|--------|
-| test@test.com | test1234 | 테스트유저 |
-| demo@demo.com | demo1234 | 데모유저 |
-| admin@admin.com | admin1234 | 관리자 |
+| test@example.com | test1234 | 테스트유저 |
+| demo@example.com | demo1234 | 데모유저 |
+| admin@example.com | admin1234 | 관리자 |
 
 ## 📡 API 엔드포인트 요약
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| POST | `/api/auth/signup` | 회원가입 |
-| POST | `/api/auth/login` | 로그인 |
-| GET | `/api/auth/kakao` | 카카오 로그인 URL |
-| GET | `/api/auth/kakao/callback` | 카카오 콜백 |
-| POST | `/api/auth/kakao/token` | 카카오 토큰 (SPA용) |
-| GET | `/api/auth/me` | 내 정보 |
-| GET | `/api/stores` | 매장 목록 |
-| GET | `/api/stores/nearby` | 근처 매장 |
-| GET | `/api/stores/{id}` | 매장 상세 |
-| POST | `/api/stores` | 매장 등록 |
-| POST | `/api/visits/gps` | GPS 방문 인증 |
-| POST | `/api/visits/receipt` | 영수증 인증 |
-| GET | `/api/visits/my` | 내 방문 내역 |
-| POST | `/api/reviews` | 리뷰 작성 |
-| GET | `/api/reviews/store/{id}` | 매장 리뷰 |
-| GET | `/api/reviews/my` | 내 리뷰 |
-| GET | `/api/ranking/store/{id}` | 매장 터줏대감 순위 |
-| GET | `/api/ranking/global` | 전체 순위 |
-| GET | `/api/ranking/my/stores` | 내 터줏대감 매장 |
-| GET | `/api/ranking/my/points` | 내 포인트 내역 |
-| GET | `/api/mypage/profile` | 프로필 조회 |
-| PUT | `/api/mypage/profile` | 프로필 수정 |
-| GET | `/api/mypage/summary` | 마이페이지 요약 |
+| Method | Endpoint | 설명 | 인증 |
+|--------|----------|------|------|
+| POST | `/api/auth/signup` | 회원가입 | ❌ |
+| POST | `/api/auth/login` | 로컬 로그인 (email+password) | ❌ |
+| POST | `/api/auth/login/social` | 소셜 로그인 (login_type+provider_id) | ❌ |
+| GET | `/api/auth/me` | 내 정보 | ✅ |
+| GET | `/api/stores` | 매장 목록 | ❌ |
+| GET | `/api/stores/nearby` | 근처 매장 | ❌ |
+| GET | `/api/stores/{id}` | 매장 상세 | ❌ |
+| POST | `/api/stores` | 매장 등록 | ❌ |
+| POST | `/api/visits/gps` | GPS 방문 인증 | ✅ |
+| POST | `/api/visits/receipt` | 영수증 인증 | ✅ |
+| GET | `/api/visits/my` | 내 방문 내역 | ✅ |
+| POST | `/api/reviews` | 리뷰 작성 | ✅ |
+| GET | `/api/reviews/store/{id}` | 매장 리뷰 | ❌ |
+| GET | `/api/reviews/my` | 내 리뷰 | ✅ |
+| GET | `/api/ranking/store/{id}` | 매장 터줏대감 순위 | ❌ |
+| GET | `/api/ranking/global` | 전체 순위 | ❌ |
+| GET | `/api/ranking/my/stores` | 내 터줏대감 매장 | ✅ |
+| GET | `/api/ranking/my/points` | 내 포인트 내역 | ✅ |
+| GET | `/api/mypage/profile` | 프로필 조회 | ✅ |
+| PUT | `/api/mypage/profile` | 프로필 수정 | ✅ |
+| GET | `/api/mypage/summary` | 마이페이지 요약 | ✅ |

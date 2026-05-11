@@ -11,7 +11,7 @@ class VisitCertification(Base):
     store_id = Column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
     user_latitude = Column(Numeric(10, 7), nullable=False)
     user_longitude = Column(Numeric(10, 7), nullable=False)
-    distance_meters = Column(Integer, nullable=False)
+    distance_meters = Column(Integer, nullable=True)
     certification_type = Column(String(50), nullable=False)  # gps, receipt
     status = Column(String(50), nullable=False, default="pending")  # pending, approved, rejected
     earned_points = Column(Integer, nullable=False, default=0)
@@ -21,5 +21,10 @@ class VisitCertification(Base):
     # Relationships
     user = relationship("User", back_populates="visit_certifications")
     store = relationship("Store", back_populates="visit_certifications")
-    reviews = relationship("Review", back_populates="visit_certification", lazy="selectin")
+    reviews = relationship(
+        "Review",
+        back_populates="visit_certification",
+        lazy="selectin",
+        uselist=False,
+    )
     point_histories = relationship("PointHistory", back_populates="visit_certification", lazy="selectin")

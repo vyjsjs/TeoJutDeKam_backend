@@ -9,7 +9,13 @@ class Review(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     store_id = Column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
-    visit_certification_id = Column(BigInteger, ForeignKey("visit_certifications.id", ondelete="SET NULL"), nullable=True)
+    visit_certification_id = Column(
+        BigInteger,
+        ForeignKey("visit_certifications.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
     rating = Column(Integer, nullable=False)
     content = Column(Text, nullable=True)
     earned_points = Column(Integer, nullable=False, default=0)

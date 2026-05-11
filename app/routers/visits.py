@@ -1,11 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from app.core.database import get_db
+from app.core.database import supabase
 from app.core.security import get_current_user
-from app.models.user import User
-from app.models.visit_certification import VisitCertification
 from app.schemas.visit import (
     VisitCertificationRequest,
     ReceiptCertificationRequest,
@@ -17,119 +13,73 @@ router = APIRouter(prefix="/api/visits", tags=["방문 인증"])
 
 
 @router.post("/gps", response_model=VisitCertificationResponse, status_code=status.HTTP_201_CREATED)
-async def certify_gps(
+def certify_gps(
     data: VisitCertificationRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     GPS 기반 방문 인증.
     매장으로부터 50m 이내일 경우 자동 승인 및 포인트 지급.
     """
     try:
-        cert = await certify_visit_gps(
-            db, current_user.id, data.store_id, data.user_latitude, data.user_longitude
+        cert = certify_visit_gps(
+            current_user["id"], data.store_id, data.user_latitude, data.user_longitude
         )
-
-        if cert.status == "rejected":
-            return VisitCertificationResponse(
-                id=cert.id,
-                user_id=cert.user_id,
-                store_id=cert.store_id,
-                user_latitude=float(cert.user_latitude),
-                user_longitude=float(cert.user_longitude),
-                distance_meters=cert.distance_meters,
-                certification_type=cert.certification_type,
-                status=cert.status,
-                earned_points=cert.earned_points,
-                certified_at=cert.certified_at,
-                created_at=cert.created_at,
-            )
-
-        return VisitCertificationResponse(
-            id=cert.id,
-            user_id=cert.user_id,
-            store_id=cert.store_id,
-            user_latitude=float(cert.user_latitude),
-            user_longitude=float(cert.user_longitude),
-            distance_meters=cert.distance_meters,
-            certification_type=cert.certification_type,
-            status=cert.status,
-            earned_points=cert.earned_points,
-            certified_at=cert.certified_at,
-            created_at=cert.created_at,
-        )
+        return VisitCertificationResponse(**cert)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post("/receipt", response_model=VisitCertificationResponse, status_code=status.HTTP_201_CREATED)
-async def certify_receipt(
+def certify_receipt(
     data: ReceiptCertificationRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     영수증 기반 방문 인증 (하는 척만).
     항상 승인 처리.
     """
     try:
-        cert = await certify_visit_receipt(
-            db, current_user.id, data.store_id,
+        cert = certify_visit_receipt(
+            current_user["id"], data.store_id,
             data.user_latitude, data.user_longitude,
             data.receipt_image_url,
         )
-        return VisitCertificationResponse(
-            id=cert.id,
-            user_id=cert.user_id,
-            store_id=cert.store_id,
-            user_latitude=float(cert.user_latitude),
-            user_longitude=float(cert.user_longitude),
-            distance_meters=cert.distance_meters,
-            certification_type=cert.certification_type,
-            status=cert.status,
-            earned_points=cert.earned_points,
-            certified_at=cert.certified_at,
-            created_at=cert.created_at,
-        )
+        return VisitCertificationResponse(**cert)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/my", response_model=list[VisitCertificationResponse])
-async def my_visit_certifications(
+def my_visit_certifications(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """내 방문 인증 내역 조회"""
-    from app.models.store import Store
+    result = supabase.table("visit_certifications") \
+        .select("*, stores(name)") \
+        .eq("user_id", current_user["id"]) \
+        .order("created_at", desc=True) \
+        .range(skip, skip + limit - 1) \
+        .execute()
 
-    result = await db.execute(
-        select(VisitCertification, Store.name)
-        .outerjoin(Store, VisitCertification.store_id == Store.id)
-        .where(VisitCertification.user_id == current_user.id)
-        .order_by(VisitCertification.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-    )
-    rows = result.all()
-
-    return [
-        VisitCertificationResponse(
-            id=cert.id,
-            user_id=cert.user_id,
-            store_id=cert.store_id,
-            user_latitude=float(cert.user_latitude),
-            user_longitude=float(cert.user_longitude),
-            distance_meters=cert.distance_meters,
-            certification_type=cert.certification_type,
-            status=cert.status,
-            earned_points=cert.earned_points,
-            certified_at=cert.certified_at,
-            created_at=cert.created_at,
-            store_name=store_name,
+    certs = []
+    for row in result.data:
+        store_data = row.get("stores", {}) or {}
+        cert = VisitCertificationResponse(
+            id=row["id"],
+            user_id=row["user_id"],
+            store_id=row["store_id"],
+            user_latitude=float(row["user_latitude"]),
+            user_longitude=float(row["user_longitude"]),
+            distance_meters=row.get("distance_meters"),
+            certification_type=row["certification_type"],
+            status=row["status"],
+            earned_points=row["earned_points"],
+            certified_at=row.get("certified_at"),
+            created_at=row["created_at"],
+            store_name=store_data.get("name"),
         )
-        for cert, store_name in rows
-    ]
+        certs.append(cert)
+    return certs
